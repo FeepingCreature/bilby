@@ -1,5 +1,5 @@
-#ifndef XFP_H
-#define XFP_H
+#ifndef BILBY_H
+#define BILBY_H
 
 #include <rdparse/util.h>
 
@@ -11,6 +11,6 @@ void setup_runtime(Definitions *defs);
 
 bool parse_tl(char **textp, Definitions *defs);
 
-bool eat_xfp_filler(char **textp);
+bool eat_bilby_filler(char **textp);
 
 #endif

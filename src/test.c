@@ -1,13 +1,13 @@
-#include "xfp.h"
+#include "bilby.h"
 
 #include <rdparse/parser.h>
 #include <stdio.h>
 
 int main() {
-  set_user_clean_fn(eat_xfp_filler);
+  set_user_clean_fn(eat_bilby_filler);
   
-  TextRange test = readfile("test.xfp");
-  register_file(test, "test.xfp", 0, 0);
+  TextRange test = readfile("test.bb");
+  register_file(test, "test.bb", 0, 0);
   
   Definitions *defs = alloc_definition_set();
   setup_runtime(defs);

@@ -1,4 +1,4 @@
-#include "xfp.h"
+#include "bilby.h"
 
 #include <rdparse/parser.h>
 
@@ -6,7 +6,7 @@
 #include <string.h>
 
 /*
- * xfp_file = ((definition | expression) '\n'+)*
+ * bilby_file = ((definition | expression) '\n'+)*
  * 
  * expression = expr_0
  * expr_0 = expr_1 ['+' expr_1|'-' expr_1]*
@@ -801,7 +801,7 @@ void dump_expr(Expr *expr) {
   } else abort();
 }
 
-bool eat_xfp_filler(char **textp) {
+bool eat_bilby_filler(char **textp) {
   while (**textp) {
     if (starts_with(textp, ";")) {
       while (**textp && **textp != '\n') (*textp)++;

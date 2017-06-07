@@ -18,9 +18,9 @@ endforeach()
 
 include_directories("rdparse")
 
-add_executable(test ${SOURCES} "src/test.c")
-target_compile_options(test PRIVATE ${FLAGS})
-target_link_libraries (test rdparse)
+add_executable(bilby ${SOURCES} "src/test.c")
+target_compile_options(bilby PRIVATE ${FLAGS})
+target_link_libraries (bilby rdparse)
 
 add_executable(repl ${SOURCES} "src/repl.c")
 target_compile_options(repl PRIVATE ${FLAGS})

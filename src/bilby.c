@@ -27,6 +27,7 @@ int DEBUG_X = 0;
 typedef enum {
   EXPR_INT,
   EXPR_STRING,
+  EXPR_UNDEFINED, // use for value of functions that do not return a value.
   EXPR_IDENTIFIER,
   EXPR_FUNCTION,
   EXPR_NATIVE_FUNCTION,
@@ -61,6 +62,7 @@ Expr *make_call_expr(Expr *fn, Expr *arg);
 Expr *make_call3_expr(Expr *fn, Expr *arg1, Expr *arg2) {
   return make_call_expr(make_call_expr(fn, arg1), arg2);
 }
+Expr *make_undefined_expr();
 Expr *make_function_expr(Expr *match, Expr *value);
 Expr *make_native_function_expr(const char *name, Expr* (*)(Definitions*,Expr*,Expr*));
 void evaluate(Expr *expr, Definitions *defs, Expr ***exprs_ptr_p, int *exprs_len_p);
@@ -184,10 +186,13 @@ bool parse_tl_define(char **textp, Definitions *defs) {
   char *text = *textp;
   Expr *match_value;
   if (!parse_expr(&text, &match_value)) return false;
-  if (!eat_string(&text, "=")) return false;
   
   Expr *value;
-  parse_must(text, parse_expr(&text, &value), "Expected expression for definition value.");
+  if (eat_string(&text, ".")) {
+    value = make_undefined_expr();
+  } else if (eat_string(&text, "=")) {
+    parse_must(text, parse_expr(&text, &value), "Expected expression for definition value.");
+  } else return false;
   
   const char *ident;
   value = transform_call_to_function_form(match_value, value, &ident);
@@ -340,6 +345,12 @@ Expr *make_int_expr(int i) {
   return (Expr*) res;
 }
 
+Expr *make_undefined_expr() {
+  Expr *res = malloc(sizeof(Expr));
+  res->type = EXPR_UNDEFINED;
+  return res;
+}
+
 Expr *make_string_expr(const char *str) {
   StringExpr *res = malloc(sizeof(StringExpr));
   res->base.type = EXPR_STRING;
@@ -446,7 +457,7 @@ Expr *substitute(Expr *expr, Definitions *changes, Definitions *defs) {
       substitute(expr_call->arg, changes, defs)
     );
   }
-  if (expr->type == EXPR_INT || expr->type == EXPR_STRING) {
+  if (expr->type == EXPR_INT || expr->type == EXPR_STRING || expr->type == EXPR_UNDEFINED) {
     return expr;
   }
   if (expr->type == EXPR_IDENTIFIER) {
@@ -602,6 +613,10 @@ void evaluate(Expr *expr, Definitions *defs, Expr ***exprs_ptr_p, int *exprs_len
     expr_array_init_capacity(&capacity, exprs_len_p);
     expr_array_push(exprs_ptr_p, exprs_len_p, &capacity, expr);
     return;
+  }
+  if (expr->type == EXPR_UNDEFINED) {
+    fprintf(stderr, "Cannot evaluate undefined value.\n");
+    fail();
   }
   if (expr->type == EXPR_NATIVE_FUNCTION) {
     NativeFunctionExpr *expr_native = (NativeFunctionExpr*) expr;
@@ -807,6 +822,8 @@ void dump_expr(Expr *expr) {
     } else {
       fprintf(stderr, "<native %s>", expr_native->name);
     }
+  } else if (expr->type == EXPR_UNDEFINED) {
+    fprintf(stderr, "<undefined>");
   } else abort();
 }
 

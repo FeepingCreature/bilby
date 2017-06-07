@@ -27,7 +27,7 @@ fib 19
 fib 20
 
 "point tests"
-point x y = 0
+point x y.
 getX (point x y) = x
 getY (point x y) = y
 origin = point 0 0
@@ -46,10 +46,6 @@ format ((vector 1 2 3) + (vector 4 5 6))
 
 ;str 0 = "0"
 ;str 1 = "1"
-
-;(str fib) 0 = "0"
-;str (fib 0)
-;str ((+ a) b) "str" "match
 
 str 0 = "0"
 ; str 1 = "1"

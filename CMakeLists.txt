@@ -10,7 +10,7 @@ set(FLAGS "-g" "-O0" "-Wall" "-Wno-maybe-uninitialized" "-Werror" "-pedantic" "-
 file(GLOB SOURCES "src/*.c")
 
 foreach(FILE ${SOURCES})
-  if("${FILE}" MATCHES "src/test.c" OR "${FILE}" MATCHES "src/repl.c")
+  if("${FILE}" MATCHES "src/main.c" OR "${FILE}" MATCHES "src/repl.c")
     list(REMOVE_ITEM SOURCES "${FILE}")
   endif()
 endforeach()
@@ -18,7 +18,7 @@ endforeach()
 
 include_directories("rdparse")
 
-add_executable(bilby ${SOURCES} "src/test.c")
+add_executable(bilby ${SOURCES} "src/main.c")
 target_compile_options(bilby PRIVATE ${FLAGS})
 target_link_libraries (bilby rdparse)
 

@@ -13,4 +13,6 @@ bool parse_tl(char **textp, Definitions *defs);
 
 bool eat_bilby_filler(char **textp);
 
+void fail() __attribute__((noreturn));
+
 #endif

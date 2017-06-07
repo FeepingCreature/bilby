@@ -73,13 +73,21 @@ void dump_expr(Expr*);
 
 void define(Definitions *defs, const char *name, Expr *value);
 
+void fail() {
+#ifdef __AFL_COMPILER
+  exit(0);
+#else
+  abort();
+#endif
+}
+
 void parse_must(char *text, bool cond, char *msg, ...) {
   if (cond) return;
   va_list ap;
   va_start(ap, msg);
   vlog_parser_error(text, msg, ap);
   va_end(ap);
-  abort();
+  fail();
 }
 
 bool parse_expr(char **text, Expr **expr);
@@ -93,7 +101,7 @@ bool parse_expr_base2(char **text, Expr **expr) {
   
   char *str;
   ParseResult res = parse_string(text, &str);
-  if (res == PARSE_ERROR) abort();
+  if (res == PARSE_ERROR) fail();
   if (res == PARSE_OK) {
     *expr = make_string_expr(str);
     return true;
@@ -107,7 +115,7 @@ bool parse_expr_base2(char **text, Expr **expr) {
   if (eat_string(text, "(")) {
     if (!parse_expr(text, expr)) {
       log_parser_error(*text, "Expression expected.");
-      abort();
+      fail();
     }
     parse_must(*text, eat_string(text, ")"), "Expression expected.");
     return true;
@@ -256,12 +264,12 @@ void lookup_one(Definitions *defs, const char *name, Expr **expr_p, bool allow_n
       return;
     }
     fprintf(stderr, "identifier not found: %s\n", name);
-    abort();
+    fail();
   }
   if (exprs_ptr != expr_p) free(exprs_ptr);
   /*if (exprs_len != 1) {
     fprintf(stderr, "multiple defs found for %s, single expected\n", name);
-    abort();
+    fail();
   }*/
 }
 
@@ -275,14 +283,14 @@ bool parse_tl_expr(char **textp, Definitions *defs) {
   int specificity;
   if (!match(value, make_identifier_expr("v"), defs, &newdefs, &specificity, false)) {
     fprintf(stderr, "Could not evaluate top-level expression.\n");
-    abort();
+    fail();
   }
   Expr *expr;
   Expr **exprs_ptr = &expr; int exprs_len = 1;
   lookup(&newdefs, "v", &exprs_ptr, &exprs_len);
   if (exprs_len != 1) {
     fprintf(stderr, "Internal error.\n");
-    abort();
+    fail();
   }
   
   expr = flatten(expr, defs);
@@ -348,7 +356,7 @@ Expr *make_identifier_expr(char *name) {
 
 Expr *make_call_expr(Expr *fn, Expr *arg) {
   if (fn->type == EXPR_INT) {
-    abort();
+    fail();
   }
   
   CallExpr *res = malloc(sizeof(CallExpr));
@@ -389,7 +397,7 @@ Expr *transform_call_to_function_form(Expr *match_expr, Expr *value, const char 
   }
   fprintf(stderr, "transform: "); dump_expr(match_expr); fprintf(stderr, "\n");
   fprintf(stderr, "TODO\n");
-  abort();
+  fail();
 }
 
 Definitions fork_definitions(Definitions *defs, Definitions *fallback) {
@@ -422,7 +430,7 @@ Expr *flatten(Expr *expr, Definitions *defs) {
     evaluate(expr, defs, &exprs2_ptr, &exprs2_len);
     if (exprs2_len != 1) {
       fprintf(stderr, "Internal error.\n");
-      abort();
+      fail();
     }
     if (expr2 == expr) break;
     expr = expr2;
@@ -457,7 +465,7 @@ Expr *substitute(Expr *expr, Definitions *changes, Definitions *defs) {
     }
     else {
       fprintf(stderr, "logic error: ambiguous substitution!\n");
-      abort();
+      fail();
     }
   }
   if (expr->type == EXPR_FUNCTION) {
@@ -486,7 +494,7 @@ Expr *substitute(Expr *expr, Definitions *changes, Definitions *defs) {
   }
   fprintf(stderr, "substitute: "); dump_expr(expr); fprintf(stderr, "\n");
   fprintf(stderr, "TODO\n");
-  abort();
+  fail();
 }
 
 void evaluate(Expr *expr, Definitions *defs, Expr ***exprs_ptr_p, int *exprs_len_p) {
@@ -497,7 +505,7 @@ void evaluate(Expr *expr, Definitions *defs, Expr ***exprs_ptr_p, int *exprs_len
     lookup(defs, ident_expr->name, exprs_ptr_p, exprs_len_p);
     if (!*exprs_len_p) {
       fprintf(stderr, "Identifier %s not found.\n", ident_expr->name);
-      abort();
+      fail();
     }
     return;
   }
@@ -524,7 +532,7 @@ void evaluate(Expr *expr, Definitions *defs, Expr ***exprs_ptr_p, int *exprs_len
         fprintf(stderr, "cannot call: not a function, ");
         dump_expr(fn_expr);
         fprintf(stderr, "\n");
-        abort();
+        fail();
       }
       FunctionExpr *fn = (FunctionExpr*) fn_expr;
       Definitions newdefs = {0};
@@ -547,7 +555,7 @@ void evaluate(Expr *expr, Definitions *defs, Expr ***exprs_ptr_p, int *exprs_len
         dump_expr(fn_exprs_ptr[i]); fprintf(stderr, "\n");
       }
       dump_expr(arg); fprintf(stderr, "\n");*/
-      // if (DEBUG_X++ == 5) abort();
+      // if (DEBUG_X++ == 5) fail();
       
       Expr *args_expr_scrap[1];
       Expr **args_exprs_ptr = args_expr_scrap; int args_exprs_len = 1;
@@ -555,7 +563,7 @@ void evaluate(Expr *expr, Definitions *defs, Expr ***exprs_ptr_p, int *exprs_len
       
       if (args_exprs_len != 1) {
         fprintf(stderr, "TODO WHY IS THIS HAPPENING\n");
-        abort();
+        fail();
       }
       Expr *subarg = args_exprs_ptr[0];
       if (subarg != arg) {
@@ -587,7 +595,7 @@ void evaluate(Expr *expr, Definitions *defs, Expr ***exprs_ptr_p, int *exprs_len
       fprintf(stderr, "\n");
     }
     fprintf(stderr, "TODO\n");
-    abort();
+    fail();
   }
   if (expr->type == EXPR_INT || expr->type == EXPR_STRING) {
     int capacity;
@@ -607,7 +615,7 @@ void evaluate(Expr *expr, Definitions *defs, Expr ***exprs_ptr_p, int *exprs_len
   
   fprintf(stderr, "evaluate: "); dump_expr(expr); fprintf(stderr, "\n");
   fprintf(stderr, "TODO\n");
-  abort();
+  fail();
 }
 
 bool match(Expr *value, Expr *target, Definitions *defs, Definitions *newdefs,
@@ -637,7 +645,7 @@ bool match(Expr *value, Expr *target, Definitions *defs, Definitions *newdefs,
     if (num_matched == 1) return true;
     
     fprintf(stderr, "TODO\n");
-    abort();
+    fail();
   }
   
   if (value->type == EXPR_NATIVE_FUNCTION && target_is_term) {
@@ -734,7 +742,7 @@ bool match(Expr *value, Expr *target, Definitions *defs, Definitions *newdefs,
   fprintf(stderr, "match: "); dump_expr(value); fprintf(stderr, "\n");
   fprintf(stderr, "   to: "); dump_expr(target); fprintf(stderr, "\n");
   fprintf(stderr, "TODO\n");
-  abort();
+  fail();
 }
 
 /*
@@ -836,7 +844,7 @@ Expr *add_fn(Definitions *defs, Expr *a, Expr *b) {
   }
   if (a->type != EXPR_INT || b->type != EXPR_INT) {
     fprintf(stderr, "internal error: invalid merge for native function\n");
-    abort();
+    fail();
   }
   return make_int_expr(((IntExpr*) a)->value + ((IntExpr*) b)->value);
 }
@@ -847,7 +855,7 @@ Expr *sub_fn(Definitions *defs, Expr *a, Expr *b) {
   
   if (a->type != EXPR_INT || b->type != EXPR_INT) {
     fprintf(stderr, "internal error: invalid merge for native function\n");
-    abort();
+    fail();
   }
   return make_int_expr(((IntExpr*) a)->value - ((IntExpr*) b)->value);
 }

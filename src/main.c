@@ -25,7 +25,7 @@ int main(int argc, const char **argv) {
       if (eat_string(&source, "\n")) continue;
       if (source == filerange.end) break;
       log_parser_error(source, "Unexpected input.");
-      abort();
+      fail();
     }
   }
   return 0;

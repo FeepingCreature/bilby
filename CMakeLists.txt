@@ -7,6 +7,8 @@ include_directories(${CMAKE_SOURCE_DIR}/rdparse/include)
 
 set(FLAGS "-g" "-O0" "-Wall" "-Wno-maybe-uninitialized" "-Werror" "-pedantic" "-std=c11" "-D_POSIX_C_SOURCE=200809L" "-D_GNU_SOURCE")
 
+# set(FLAGS ${FLAGS} "-fsanitize=address,undefined,bounds")
+
 file(GLOB SOURCES "src/*.c")
 
 foreach(FILE ${SOURCES})
@@ -20,8 +22,10 @@ include_directories("rdparse")
 
 add_executable(bilby ${SOURCES} "src/main.c")
 target_compile_options(bilby PRIVATE ${FLAGS})
+# target_link_libraries (bilby asan ubsan rdparse)
 target_link_libraries (bilby rdparse)
 
 add_executable(repl ${SOURCES} "src/repl.c")
 target_compile_options(repl PRIVATE ${FLAGS})
+# target_link_libraries (repl asan ubsan rdparse readline)
 target_link_libraries (repl rdparse readline)

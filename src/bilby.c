@@ -746,11 +746,13 @@ void evaluate(Expr *expr, Definitions *defs, Expr ***exprs_ptr_p, int *exprs_len
           }
         }
       }
-      if (num_matched > 1) {
+      /*if (num_matched > 1) {
         fprintf(stderr, "whaat.. multiple functions matched at the same level of specificity: %i\n", num_matched);
+        dump_expr_list(fn_list); fprintf(stderr, "\n");
+        dump_expr_list(arg_list); fprintf(stderr, "\n");
         fail();
-      }
-      if (num_matched == 1) break;
+      }*/
+      if (num_matched >= 1) break;
     }
     
     indent_depth --;
@@ -767,6 +769,7 @@ void evaluate(Expr *expr, Definitions *defs, Expr ***exprs_ptr_p, int *exprs_len
       }
       return;
     }
+    return;
     
     fprintf(stderr, "while evaluating ");
     dump_expr(expr);

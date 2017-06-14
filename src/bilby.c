@@ -665,6 +665,30 @@ void flatten_list(ExprList *list, Definitions *defs) {
   }
 }
 
+void step_expr_list(ExprList *list, Definitions *defs) {
+  int start_len = list->len;
+  while (list->len == start_len) {
+    if (list->next_evaluate == list->len) return;
+    
+    Expr *eval_arg = list->ptr[list->next_evaluate++];
+    
+    Expr *new_args_expr_scrap[1];
+    Expr **new_args_exprs_ptr = new_args_expr_scrap; int new_args_exprs_len = 1;
+    evaluate(eval_arg, defs, &new_args_exprs_ptr, &new_args_exprs_len);
+    for (int i = 0; i < new_args_exprs_len; i++) {
+      bool dupe = false;
+      for (int k = 0; k < list->len; k++) {
+        if (list->ptr[k] == new_args_exprs_ptr[i]) {
+          dupe = true;
+          break;
+        }
+      }
+      if (dupe) continue;
+      expr_list_push(list, new_args_exprs_ptr[i]);
+    }
+  }
+}
+
 void evaluate(Expr *expr, Definitions *defs, Expr ***exprs_ptr_p, int *exprs_len_p) {
   if (verbose) {
     fprintf(stderr, "%*seval : ", indent_depth, ""); dump_expr(expr); fprintf(stderr, "\n");
@@ -736,25 +760,7 @@ void evaluate(Expr *expr, Definitions *defs, Expr ***exprs_ptr_p, int *exprs_len
           }
           
           if (cur_arg < arg_list->len - 1) continue; // still got cached args to go
-          
-          if (arg_list->next_evaluate == arg_list->len) break; // have evaluated all args, already found no new ones
-          
-          Expr *eval_arg = arg_list->ptr[arg_list->next_evaluate++];
-          
-          Expr *new_args_expr_scrap[1];
-          Expr **new_args_exprs_ptr = new_args_expr_scrap; int new_args_exprs_len = 1;
-          evaluate(eval_arg, defs, &new_args_exprs_ptr, &new_args_exprs_len);
-          for (int i = 0; i < new_args_exprs_len; i++) {
-            bool dupe = false;
-            for (int k = 0; k < arg_list->len; k++) {
-              if (arg_list->ptr[k] == new_args_exprs_ptr[i]) {
-                dupe = true;
-                break;
-              }
-            }
-            if (dupe) continue;
-            expr_list_push(arg_list, new_args_exprs_ptr[i]);
-          }
+          step_expr_list(arg_list, defs);
         }
       }
       /*if (num_matched > 1) {
@@ -831,7 +837,10 @@ bool match_any(ExprList *values, Expr *target, Definitions *defs, Definitions *n
            bool lexical, bool direct) {
   for (int i = 0; i < values->len; i++) {
     if (match(values->ptr[i], target, defs, newdefs, lexical, direct)) return true;
+    if (i < values->len - 1) continue; // still got cached args to go
+    step_expr_list(values, defs);
   }
+  
   return false;
 }
 

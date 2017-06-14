@@ -1,7 +1,7 @@
 ; lisp.bb
 
 nil.
-cons.
+cons a b.
 format (cons a b) = "(" + format(a) + " . " + format(b) + ")"
 format %nil = "nil"
 format _ = "" + _
@@ -20,4 +20,16 @@ mapcar ($fn %nil) = nil
 
 "mapcar test"
 format (mapcar (double nil))
+; format (mapcar (double (cons 1 nil)))
 format (mapcar (double (cons 1 (cons 2 (cons 3 nil)))))
+
+reduce ($fn acc (cons a b)) = reduce (fn (fn acc a) b)
+reduce ($fn acc %nil) = acc
+
+"reduce test"
+format (reduce (0 + nil))
+format (reduce (0 + (cons 1 (cons 2 (cons 3 (cons 4 nil))))))
+
+"combined test"
+format (mapcar (double (cons 1 (cons 2 (cons 3 (cons 4 nil))))))
+format (reduce (0 + (mapcar (double (cons 1 (cons 2 (cons 3 (cons 4 nil))))))))

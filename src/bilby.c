@@ -551,6 +551,17 @@ Expr *substitute_in_expr(Expr *expr, Definitions *changes, Definitions *defs) {
   }
   if (expr->type == EXPR_FUNCTION) {
     FunctionExpr *expr_fun = (FunctionExpr*) expr;
+    DefinitionList *cursor = changes->listp;
+    while (cursor) {
+      if (expr_fun->match->type == EXPR_IDENTIFIER) {
+        IdentifierExpr *match = (IdentifierExpr*) expr_fun->match;
+        if (strcmp(match->name, cursor->def.name) == 0) {
+          // fprintf(stderr, "collision while substituting %s\n", match->name);
+          return expr;
+        }
+      }
+      cursor = cursor->prev;
+    }
     // TODO raise a stink if this substitution collides with our running one,
     // or mask the current substitution.
     return make_function_expr_from_list(

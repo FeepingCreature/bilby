@@ -178,23 +178,42 @@ bool parse_expr_base(char **text, Expr **expr) {
   return true;
 }
 
-bool parse_expr2(char **text, Expr **expr) {
+bool parse_expr3(char **text, Expr **expr) {
   return parse_expr_base(text, expr);
 }
 
-bool parse_expr1(char **text, Expr **expr) {
-  if (!parse_expr2(text, expr)) return false;
+bool parse_expr2(char **text, Expr **expr) {
+  if (!parse_expr3(text, expr)) return false;
   while (true) {
     if (eat_string(text, "*")) {
       Expr *expr2;
-      parse_must(*text, parse_expr2(text, &expr2), "Expression expected");
+      parse_must(*text, parse_expr3(text, &expr2), "Expression expected");
       *expr = make_call3_expr(make_identifier_expr("*"), *expr, expr2);
       continue;
     }
     if (eat_string(text, "/")) {
       Expr *expr2;
-      parse_must(*text, parse_expr2(text, &expr2), "Expression expected");
+      parse_must(*text, parse_expr3(text, &expr2), "Expression expected");
       *expr = make_call3_expr(make_identifier_expr("/"), *expr, expr2);
+      continue;
+    }
+    return true;
+  }
+}
+
+bool parse_expr1(char **text, Expr **expr) {
+  if (!parse_expr2(text, expr)) return false;
+  while (true) {
+    if (eat_string(text, "+")) {
+      Expr *expr2;
+      parse_must(*text, parse_expr2(text, &expr2), "Expression expected");
+      *expr = make_call3_expr(make_identifier_expr("+"), *expr, expr2);
+      continue;
+    }
+    if (eat_string(text, "-")) {
+      Expr *expr2;
+      parse_must(*text, parse_expr2(text, &expr2), "Expression expected");
+      *expr = make_call3_expr(make_identifier_expr("-"), *expr, expr2);
       continue;
     }
     return true;
@@ -204,16 +223,22 @@ bool parse_expr1(char **text, Expr **expr) {
 bool parse_expr0(char **text, Expr **expr) {
   if (!parse_expr1(text, expr)) return false;
   while (true) {
-    if (eat_string(text, "+")) {
+    if (eat_string(text, "<")) {
       Expr *expr2;
       parse_must(*text, parse_expr1(text, &expr2), "Expression expected");
-      *expr = make_call3_expr(make_identifier_expr("+"), *expr, expr2);
+      *expr = make_call3_expr(make_identifier_expr("<"), *expr, expr2);
       continue;
     }
-    if (eat_string(text, "-")) {
+    if (eat_string(text, "==")) {
       Expr *expr2;
       parse_must(*text, parse_expr1(text, &expr2), "Expression expected");
-      *expr = make_call3_expr(make_identifier_expr("-"), *expr, expr2);
+      *expr = make_call3_expr(make_identifier_expr("=="), *expr, expr2);
+      continue;
+    }
+    if (eat_string(text, ">")) {
+      Expr *expr2;
+      parse_must(*text, parse_expr1(text, &expr2), "Expression expected");
+      *expr = make_call3_expr(make_identifier_expr(">"), *expr, expr2);
       continue;
     }
     return true;
@@ -1055,9 +1080,8 @@ Expr *add_fn(Definitions *defs, ExprList *a, ExprList *b) {
     return make_string_expr(combined);
   }
   if (a_expr->type != EXPR_INT || b_expr->type != EXPR_INT) {
-    return make_undefined_expr();
-    // fprintf(stderr, "internal error: invalid merge for native function\n");
-    // fail();
+    fprintf(stderr, "internal error: invalid merge for native function\n");
+    fail();
   }
   return make_int_expr(((IntExpr*) a_expr)->value + ((IntExpr*) b_expr)->value);
 }
@@ -1072,11 +1096,56 @@ Expr *sub_fn(Definitions *defs, ExprList *a, ExprList *b) {
   if (b->len == 0) fail();
   Expr *b_expr = b->ptr[b->len - 1];
   
+  if (a_expr->type == EXPR_UNDEFINED) return a_expr;
+  if (b_expr->type == EXPR_UNDEFINED) return b_expr;
+  
   if (a_expr->type != EXPR_INT || b_expr->type != EXPR_INT) {
-    fprintf(stderr, "internal error: invalid merge for native function\n");
+    fprintf(stderr, "internal error: invalid merge for native function '-'\n");
+    fprintf(stderr, "a: "); dump_expr(a_expr); fprintf(stderr, "\n");
+    fprintf(stderr, "b: "); dump_expr(b_expr); fprintf(stderr, "\n");
     fail();
   }
   return make_int_expr(((IntExpr*) a_expr)->value - ((IntExpr*) b_expr)->value);
+}
+
+Expr *cmp_fn(Definitions *defs, ExprList *a, ExprList *b, int type) {
+  flatten_list(a, defs);
+  flatten_list(b, defs);
+  
+  if (a->len == 0) fail();
+  Expr *a_expr = a->ptr[a->len - 1]; // most resolved
+  
+  if (b->len == 0) fail();
+  Expr *b_expr = b->ptr[b->len - 1];
+  
+  if (a_expr->type == EXPR_UNDEFINED) return a_expr;
+  if (b_expr->type == EXPR_UNDEFINED) return b_expr;
+  
+  if (a_expr->type != EXPR_INT || b_expr->type != EXPR_INT) {
+    fprintf(stderr, "internal error: invalid merge for native function '<>'\n");
+    fprintf(stderr, "a: "); dump_expr(a_expr); fprintf(stderr, "\n");
+    fprintf(stderr, "b: "); dump_expr(b_expr); fprintf(stderr, "\n");
+    fail();
+  }
+  
+  int av = ((IntExpr*) a_expr)->value;
+  int bv = ((IntExpr*) b_expr)->value;
+  if (type == 0) return make_int_expr(av < bv);
+  if (type == 1) return make_int_expr(av == bv);
+  if (type == 2) return make_int_expr(av > bv);
+  abort();
+}
+
+Expr *smaller_fn(Definitions *defs, ExprList *a, ExprList *b) {
+  return cmp_fn(defs, a, b, 0);
+}
+
+Expr *equal_fn(Definitions *defs, ExprList *a, ExprList *b) {
+  return cmp_fn(defs, a, b, 1);
+}
+
+Expr *larger_fn(Definitions *defs, ExprList *a, ExprList *b) {
+  return cmp_fn(defs, a, b, 2);
 }
 
 void setup_runtime(Definitions *defs) {
@@ -1089,6 +1158,24 @@ void setup_runtime(Definitions *defs) {
   define(defs, "-", make_function_expr(make_identifier_expr("a"),
     make_function_expr(make_identifier_expr("b"),
       make_native_function_expr("sub_fn", sub_fn)
+    )
+  ), true);
+  
+  define(defs, "<", make_function_expr(make_identifier_expr("a"),
+    make_function_expr(make_identifier_expr("b"),
+      make_native_function_expr("smaller_fn", smaller_fn)
+    )
+  ), true);
+  
+  define(defs, "==", make_function_expr(make_identifier_expr("a"),
+    make_function_expr(make_identifier_expr("b"),
+      make_native_function_expr("equal_fn", equal_fn)
+    )
+  ), true);
+  
+  define(defs, ">", make_function_expr(make_identifier_expr("a"),
+    make_function_expr(make_identifier_expr("b"),
+      make_native_function_expr("larger_fn", larger_fn)
     )
   ), true);
 }

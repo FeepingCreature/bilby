@@ -5,11 +5,16 @@
 
 typedef struct Definitions Definitions;
 
+typedef struct {
+  Definitions *defs;
+  bool verbose;
+} Environment;
+
 Definitions *alloc_definition_set();
 
-void setup_runtime(Definitions *defs);
+void setup_runtime(Environment *env);
 
-bool parse_tl(char **textp, Definitions *defs);
+bool parse_tl(char **textp, Environment *env);
 
 bool eat_bilby_filler(char **textp);
 
@@ -74,7 +79,7 @@ typedef struct {
   Expr base;
   const char *name;
   // TODO arity other than 2
-  Expr* (*resolve_fn)(Definitions*, ExprList *a, ExprList *b);
+  Expr* (*resolve_fn)(Environment*, ExprList *a, ExprList *b);
   ExprList *a, *b; // arguments
 } NativeFunctionExpr;
 

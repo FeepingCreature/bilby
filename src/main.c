@@ -17,11 +17,15 @@ int main(int argc, const char **argv) {
     register_file(filerange, filename, 0, 0);
     
     Definitions *defs = alloc_definition_set();
-    setup_runtime(defs);
+    Environment env = {
+      .defs = defs,
+      .verbose = false
+    };
+    setup_runtime(&env);
     
     char *source = filerange.start;
     while (true) {
-      if (parse_tl(&source, defs)) continue;
+      if (parse_tl(&source, &env)) continue;
       if (eat_string(&source, "\n")) continue;
       if (source == filerange.end) break;
       log_parser_error(source, "Unexpected input.");

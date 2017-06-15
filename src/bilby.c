@@ -52,14 +52,16 @@ Expr *make_call3_expr(Expr *fn, Expr *arg1, Expr *arg2) {
 Expr *make_undefined_expr();
 Expr *make_function_expr(Expr *match, Expr *value);
 Expr *make_function_expr_from_list(Expr *match, ExprList *value);
-Expr *make_native_function_expr(const char *name, Expr* (*)(Definitions*,ExprList*,ExprList*));
-void evaluate(Expr *expr, Definitions *defs, Expr ***exprs_ptr_p, int *exprs_len_p);
-Expr *flatten(Expr *expr, Definitions *defs);
+Expr *make_native_function_expr(const char *name, Expr* (*)(Environment*,ExprList*,ExprList*));
+void evaluate(Expr *expr, Environment *env, Expr ***exprs_ptr_p, int *exprs_len_p);
+Expr *flatten(Expr *expr, Environment *env);
 // fn x y = 5 is parsed by treating "fn x y" as an expression, ie. ((fn x) y)
 // this function transforms it into fn = x -> y -> 5
 Expr *transform_call_to_function_form(Expr *match_expr, Expr *value, const char **ident);
 
 void dump_expr(Expr*);
+void dump_expr_first(Expr*);
+void dump_expr_internal(Expr*, bool first_only);
 
 void define(Definitions *defs, const char *name, Expr *value, bool may_repeat);
 
@@ -102,7 +104,15 @@ Expr *get_single_expr(ExprList *list) {
   return list->ptr[0];
 }
 
-void dump_expr_list(ExprList *list) {
+void dump_expr_list_internal(ExprList *list, bool first_only) {
+  if (first_only) {
+    if (list->len == 0) {
+      fprintf(stderr, "[]");
+      return;
+    }
+    dump_expr_internal(list->ptr[0], true);
+    return;
+  }
   if (list->len != 1) {
     fprintf(stderr, "[");
   }
@@ -113,6 +123,10 @@ void dump_expr_list(ExprList *list) {
   if (list->len != 1) {
     fprintf(stderr, "]");
   }
+}
+
+void dump_expr_list(ExprList *list) {
+  dump_expr_list_internal(list, false);
 }
 
 void parse_must(char *text, bool cond, char *msg, ...) {
@@ -249,7 +263,7 @@ bool parse_expr(char **text, Expr **expr) {
   return parse_expr0(text, expr);
 }
 
-bool parse_tl_define(char **textp, Definitions *defs) {
+bool parse_tl_define(char **textp, Environment *env) {
   char *text = *textp;
   Expr *match_value;
   if (!parse_expr(&text, &match_value)) return false;
@@ -264,7 +278,7 @@ bool parse_tl_define(char **textp, Definitions *defs) {
   const char *ident;
   value = transform_call_to_function_form(match_value, value, &ident);
   
-  define(defs, ident, value, true);
+  define(env->defs, ident, value, true);
   
   *textp = text;
   return true;
@@ -366,26 +380,21 @@ void lookup_one(Definitions *defs, const char *name, Expr **expr_p, bool allow_n
   }*/
 }
 
-bool match(Expr *value, Expr *target, Definitions *defs, Definitions *newdefs,
+bool match(Expr *value, Expr *target, Environment *env, Definitions *newdefs,
            bool lexical, bool direct);
 
-bool parse_tl_expr(char **textp, Definitions *defs) {
+bool parse_tl_expr(char **textp, Environment *env) {
   Expr *value;
   if (!parse_expr(textp, &value)) return false;
-  Definitions newdefs = {0};
-  if (!match(value, make_identifier_expr("v"), defs, &newdefs, false, false)) {
-    fprintf(stderr, "Could not evaluate top-level expression.\n");
-    fail();
+  Expr *expr = flatten(value, env);
+  if (expr->type == EXPR_UNDEFINED) {
+    fprintf(stderr, "! Error:\n");
+    Environment debug_env = *env;
+    debug_env.verbose = true;
+    flatten(value, &debug_env);
+    fprintf(stderr, "! No expression matched.\n");
+    return true;
   }
-  Expr *expr;
-  Expr **exprs_ptr = &expr; int exprs_len = 1;
-  lookup(&newdefs, "v", &exprs_ptr, &exprs_len);
-  if (exprs_len != 1) {
-    fprintf(stderr, "Internal error.\n");
-    fail();
-  }
-  
-  expr = flatten(expr, defs);
   dump_expr(expr); fprintf(stderr, "\n");
   return true;
 }
@@ -447,7 +456,7 @@ Expr *make_function_expr_from_list(Expr *match, ExprList *value) {
   return (Expr*) res;
 }
 
-Expr *make_native_function_expr(const char *name, Expr *(*fn)(Definitions*,ExprList*,ExprList*)) {
+Expr *make_native_function_expr(const char *name, Expr *(*fn)(Environment*,ExprList*,ExprList*)) {
   NativeFunctionExpr *res = malloc(sizeof(NativeFunctionExpr));
   res->base.type = EXPR_NATIVE_FUNCTION;
   res->name = name;
@@ -492,7 +501,7 @@ void merge_definitions(Definitions *target, Definitions *src) {
   }
 }
 
-Expr *flatten(Expr *expr, Definitions *defs) {
+Expr *flatten(Expr *expr, Environment *env) {
   while (true) {
     /*fprintf(stderr, " - - -f-l-a-t-t-e-n- - -\n");
     dump_expr(expr);
@@ -500,8 +509,15 @@ Expr *flatten(Expr *expr, Definitions *defs) {
     
     Expr *expr2 = NULL;
     Expr **exprs2_ptr = &expr2; int exprs2_len = 1;
-    evaluate(expr, defs, &exprs2_ptr, &exprs2_len);
-    if (exprs2_len == 0) return make_undefined_expr();
+    if (env->verbose) {
+      fprintf(stderr, "While flattening ");
+      dump_expr_first(expr);
+      fprintf(stderr, ":\n");
+    }
+    evaluate(expr, env, &exprs2_ptr, &exprs2_len);
+    if (exprs2_len == 0) {
+      return make_undefined_expr();
+    }
     if (exprs2_len != 1) {
       fprintf(stderr, "Internal error.\n");
       fail();
@@ -640,7 +656,7 @@ int get_specificity(Expr *expr, bool force_lexical) {
   fail();
 }
 
-void flatten_list(ExprList *list, Definitions *defs) {
+void flatten_list(ExprList *list, Environment *env) {
   Expr *new_exprs_scrap[1];
   Expr **new_exprs_ptr = new_exprs_scrap; int new_exprs_len = 1;
   int capacity = 1;
@@ -650,7 +666,7 @@ void flatten_list(ExprList *list, Definitions *defs) {
     
     expr_array_reset(&new_exprs_ptr, &new_exprs_len, &capacity,
                      new_exprs_scrap, new_exprs_len);
-    evaluate(expr, defs, &new_exprs_ptr, &new_exprs_len);
+    evaluate(expr, env, &new_exprs_ptr, &new_exprs_len);
     for (int i = 0; i < new_exprs_len; i++) {
       bool dupe = false;
       for (int k = 0; k < list->len; k++) {
@@ -665,7 +681,7 @@ void flatten_list(ExprList *list, Definitions *defs) {
   }
 }
 
-void step_expr_list(ExprList *list, Definitions *defs) {
+void step_expr_list(ExprList *list, Environment *env) {
   int start_len = list->len;
   while (list->len == start_len) {
     if (list->next_evaluate == list->len) return;
@@ -674,7 +690,7 @@ void step_expr_list(ExprList *list, Definitions *defs) {
     
     Expr *new_args_expr_scrap[1];
     Expr **new_args_exprs_ptr = new_args_expr_scrap; int new_args_exprs_len = 1;
-    evaluate(eval_arg, defs, &new_args_exprs_ptr, &new_args_exprs_len);
+    evaluate(eval_arg, env, &new_args_exprs_ptr, &new_args_exprs_len);
     for (int i = 0; i < new_args_exprs_len; i++) {
       bool dupe = false;
       for (int k = 0; k < list->len; k++) {
@@ -689,14 +705,14 @@ void step_expr_list(ExprList *list, Definitions *defs) {
   }
 }
 
-void evaluate(Expr *expr, Definitions *defs, Expr ***exprs_ptr_p, int *exprs_len_p) {
+void evaluate(Expr *expr, Environment *env, Expr ***exprs_ptr_p, int *exprs_len_p) {
   if (verbose) {
     fprintf(stderr, "%*seval : ", indent_depth, ""); dump_expr(expr); fprintf(stderr, "\n");
   }
   if (expr->type == EXPR_IDENTIFIER) {
     IdentifierExpr *ident_expr = (IdentifierExpr*) expr;
     
-    lookup(defs, ident_expr->name, exprs_ptr_p, exprs_len_p);
+    lookup(env->defs, ident_expr->name, exprs_ptr_p, exprs_len_p);
     if (!*exprs_len_p) {
       fprintf(stderr, "Identifier %s not found.\n", ident_expr->name);
       fail();
@@ -711,7 +727,7 @@ void evaluate(Expr *expr, Definitions *defs, Expr ***exprs_ptr_p, int *exprs_len
     // fprintf(stderr, "%*sflatten functions: ", indent_depth, ""); dump_expr_list(call_expr->fn); fprintf(stderr, "\n");
     ExprList *fn_list = call_expr->fn;
     // int prev_len = fn_list->len;
-    flatten_list(fn_list, defs);
+    flatten_list(fn_list, env);
     /*if (fn_list->len != prev_len) {
       fprintf(stderr, "%*s => : ", indent_depth, ""); dump_expr_list(call_expr->fn); fprintf(stderr, "\n");
     }*/
@@ -752,15 +768,15 @@ void evaluate(Expr *expr, Definitions *defs, Expr ***exprs_ptr_p, int *exprs_len
         for (int cur_arg = 0; cur_arg < arg_list->len; cur_arg++) {
           Expr *arg = arg_list->ptr[cur_arg];
           Definitions newdefs = {0};
-          if (match(arg, fn->match, defs, &newdefs, false, true)) {
-            ExprList *new_values = substitute_in_list(fn->value, &newdefs, defs);
+          if (match(arg, fn->match, env, &newdefs, false, true)) {
+            ExprList *new_values = substitute_in_list(fn->value, &newdefs, env->defs);
             expr_array_push_list(exprs_ptr_p, exprs_len_p, &capacity, new_values);
             num_matched ++;
             break;
           }
           
           if (cur_arg < arg_list->len - 1) continue; // still got cached args to go
-          step_expr_list(arg_list, defs);
+          step_expr_list(arg_list, env);
         }
       }
       /*if (num_matched > 1) {
@@ -817,7 +833,7 @@ void evaluate(Expr *expr, Definitions *defs, Expr ***exprs_ptr_p, int *exprs_len
     // abort();
     NativeFunctionExpr *expr_native = (NativeFunctionExpr*) expr;
     indent_depth ++;
-    Expr *res_expr = expr_native->resolve_fn(defs, expr_native->a, expr_native->b);
+    Expr *res_expr = expr_native->resolve_fn(env, expr_native->a, expr_native->b);
     indent_depth --;
     
     int capacity;
@@ -833,18 +849,18 @@ void evaluate(Expr *expr, Definitions *defs, Expr ***exprs_ptr_p, int *exprs_len
   fail();
 }
 
-bool match_any(ExprList *values, Expr *target, Definitions *defs, Definitions *newdefs,
+bool match_any(ExprList *values, Expr *target, Environment *env, Definitions *newdefs,
            bool lexical, bool direct) {
   for (int i = 0; i < values->len; i++) {
-    if (match(values->ptr[i], target, defs, newdefs, lexical, direct)) return true;
+    if (match(values->ptr[i], target, env, newdefs, lexical, direct)) return true;
     if (i < values->len - 1) continue; // still got cached args to go
-    step_expr_list(values, defs);
+    step_expr_list(values, env);
   }
   
   return false;
 }
 
-bool _match(Expr *value, Expr *target, Definitions *defs, Definitions *newdefs,
+bool _match(Expr *value, Expr *target, Environment *env, Definitions *newdefs,
            bool lexical, bool direct) {
   bool value_is_primitive = value->type == EXPR_INT || value->type == EXPR_STRING || value->type == EXPR_UNDEFINED;
   bool target_is_primitive = target->type == EXPR_INT || target->type == EXPR_STRING || value->type == EXPR_UNDEFINED;
@@ -857,11 +873,11 @@ bool _match(Expr *value, Expr *target, Definitions *defs, Definitions *newdefs,
     
     Expr *values_scrap[1];
     Expr **values_ptr = values_scrap; int values_len = 1;
-    evaluate(value, defs, &values_ptr, &values_len);
+    evaluate(value, env, &values_ptr, &values_len);
     
     int num_matched = 0;
     for (int i = 0; i < values_len; i++) {
-      if (match(values_ptr[0], target, defs, newdefs, false, false))
+      if (match(values_ptr[0], target, env, newdefs, false, false))
         num_matched ++;
     }
     if (values_ptr != values_scrap) free(values_ptr);
@@ -876,14 +892,17 @@ bool _match(Expr *value, Expr *target, Definitions *defs, Definitions *newdefs,
   if (value->type == EXPR_NATIVE_FUNCTION && target_is_term) {
     if (direct) return false;
     NativeFunctionExpr *value_native = (NativeFunctionExpr*) value;
-    value = value_native->resolve_fn(defs, value_native->a, value_native->b);
+    value = value_native->resolve_fn(env, value_native->a, value_native->b);
     if (value->type == EXPR_UNDEFINED) return false;
-    return match(value, target, defs, newdefs, false, false);
+    return match(value, target, env, newdefs, false, false);
   }
   
   if (value->type == EXPR_INT && target->type == EXPR_INT) {
     if (((IntExpr*) value)->value != ((IntExpr*) target)->value) return false;
     return true;
+  }
+  if (value->type == EXPR_STRING && target->type == EXPR_INT) {
+    return false;
   }
   
   // check for lexical override, ie. %foo
@@ -914,8 +933,8 @@ bool _match(Expr *value, Expr *target, Definitions *defs, Definitions *newdefs,
     CallExpr *value_call = (CallExpr*) value;
     CallExpr *target_call = (CallExpr*) target;
     // TODO
-    if (!match_any(value_call->fn, get_single_expr(target_call->fn), defs, newdefs, true, false)) return false;
-    if (!match_any(value_call->arg, get_single_expr(target_call->arg), defs, newdefs, false, false)) return false;
+    if (!match_any(value_call->fn, get_single_expr(target_call->fn), env, newdefs, true, false)) return false;
+    if (!match_any(value_call->arg, get_single_expr(target_call->arg), env, newdefs, false, false)) return false;
     return true;
   }
   
@@ -923,14 +942,14 @@ bool _match(Expr *value, Expr *target, Definitions *defs, Definitions *newdefs,
     if (direct) return false;
     Expr *values_scrap[1];
     Expr **values_ptr = values_scrap; int values_len = 1;
-    evaluate(value, defs, &values_ptr, &values_len);
+    evaluate(value, env, &values_ptr, &values_len);
     
     Expr *match_expr = NULL;
     Definitions match_defs = {0};
     
     for (int i = 0; i < values_len; i++) {
       Definitions newdefs2 = {0};
-      if (match(values_ptr[i], target, defs, &newdefs2, false, false)) {
+      if (match(values_ptr[i], target, env, &newdefs2, false, false)) {
         match_defs = newdefs2;
         match_expr = values_ptr[i];
         continue;
@@ -971,7 +990,7 @@ bool _match(Expr *value, Expr *target, Definitions *defs, Definitions *newdefs,
 
 // lexical: match function names as names, not values
 // direct: do not attempt to evaluate.
-bool match(Expr *value, Expr *target, Definitions *defs, Definitions *newdefs,
+bool match(Expr *value, Expr *target, Environment *env, Definitions *newdefs,
            bool lexical, bool direct) {
   if (indent_depth > 1024) {
     fprintf(stderr, "depth exceeded.\n");
@@ -982,7 +1001,7 @@ bool match(Expr *value, Expr *target, Definitions *defs, Definitions *newdefs,
     fprintf(stderr, "%*sto   : ", indent_depth, ""); dump_expr(target); fprintf(stderr, "\n");
   }
   indent_depth ++;
-  bool res = _match(value, target, defs, newdefs, lexical, direct);
+  bool res = _match(value, target, env, newdefs, lexical, direct);
   indent_depth --;
   if (verbose) {
     if (res) fprintf(stderr, "%*s.. match!\n", indent_depth, "");
@@ -1023,7 +1042,7 @@ bool match(Expr *value, Expr *target, Definitions *defs, Definitions *newdefs,
  * etc.
  */
 
-void dump_expr(Expr *expr) {
+void dump_expr_internal(Expr *expr, bool first_only) {
   if (expr->type == EXPR_INT) {
     fprintf(stderr, "%i", ((IntExpr*)expr)->value);
   } else if (expr->type == EXPR_STRING) {
@@ -1032,23 +1051,23 @@ void dump_expr(Expr *expr) {
     fprintf(stderr, "%s", ((IdentifierExpr*)expr)->name);
   } else if (expr->type == EXPR_CALL) {
     CallExpr *expr_call = (CallExpr*) expr;
-    dump_expr_list(expr_call->fn);
+    dump_expr_list_internal(expr_call->fn, first_only);
     fprintf(stderr, " (");
-    dump_expr_list(expr_call->arg);
+    dump_expr_list_internal(expr_call->arg, first_only);
     fprintf(stderr, ")");
   } else if (expr->type == EXPR_FUNCTION) {
     FunctionExpr *expr_fn = (FunctionExpr*) expr;
-    dump_expr(expr_fn->match);
+    dump_expr_internal(expr_fn->match, first_only);
     fprintf(stderr, " -> (");
-    dump_expr_list(expr_fn->value);
+    dump_expr_list_internal(expr_fn->value, first_only);
     fprintf(stderr, ")");
   } else if (expr->type == EXPR_NATIVE_FUNCTION) {
     NativeFunctionExpr *expr_native = (NativeFunctionExpr*) expr;
     if (expr_native->a && expr_native->b) {
       fprintf(stderr, "%s (", expr_native->name);
-      dump_expr_list(expr_native->a);
+      dump_expr_list_internal(expr_native->a, first_only);
       fprintf(stderr, ") (");
-      dump_expr_list(expr_native->b);
+      dump_expr_list_internal(expr_native->b, first_only);
       fprintf(stderr, ")");
     } else {
       fprintf(stderr, "<native %s>", expr_native->name);
@@ -1056,6 +1075,14 @@ void dump_expr(Expr *expr) {
   } else if (expr->type == EXPR_UNDEFINED) {
     fprintf(stderr, "<undefined>");
   } else abort();
+}
+
+void dump_expr(Expr *expr) {
+  dump_expr_internal(expr, false);
+}
+
+void dump_expr_first(Expr *expr) {
+  dump_expr_internal(expr, true);
 }
 
 bool eat_bilby_filler(char **textp) {
@@ -1069,11 +1096,11 @@ bool eat_bilby_filler(char **textp) {
   return true;
 }
 
-Expr *add_fn(Definitions *defs, ExprList *a, ExprList *b) {
+Expr *add_fn(Environment *env, ExprList *a, ExprList *b) {
   // fprintf(stderr, "[flatten a]\n");
-  flatten_list(a, defs);
+  flatten_list(a, env);
   // fprintf(stderr, "[flatten b]\n");
-  flatten_list(b, defs);
+  flatten_list(b, env);
   
   if (a->len == 0) fail();
   Expr *a_expr = a->ptr[a->len - 1]; // most resolved
@@ -1103,15 +1130,14 @@ Expr *add_fn(Definitions *defs, ExprList *a, ExprList *b) {
     return make_string_expr(combined);
   }
   if (a_expr->type != EXPR_INT || b_expr->type != EXPR_INT) {
-    fprintf(stderr, "internal error: invalid merge for native function\n");
-    fail();
+    return make_undefined_expr();
   }
   return make_int_expr(((IntExpr*) a_expr)->value + ((IntExpr*) b_expr)->value);
 }
 
-Expr *sub_fn(Definitions *defs, ExprList *a, ExprList *b) {
-  flatten_list(a, defs);
-  flatten_list(b, defs);
+Expr *sub_fn(Environment *env, ExprList *a, ExprList *b) {
+  flatten_list(a, env);
+  flatten_list(b, env);
   
   if (a->len == 0) fail();
   Expr *a_expr = a->ptr[a->len - 1]; // most resolved
@@ -1123,17 +1149,19 @@ Expr *sub_fn(Definitions *defs, ExprList *a, ExprList *b) {
   if (b_expr->type == EXPR_UNDEFINED) return b_expr;
   
   if (a_expr->type != EXPR_INT || b_expr->type != EXPR_INT) {
-    fprintf(stderr, "internal error: invalid merge for native function '-'\n");
-    fprintf(stderr, "a: "); dump_expr(a_expr); fprintf(stderr, "\n");
-    fprintf(stderr, "b: "); dump_expr(b_expr); fprintf(stderr, "\n");
-    fail();
+    if (env->verbose) {
+      fprintf(stderr, "Invalid operands for sub_fn: ");
+      dump_expr(a_expr); fprintf(stderr, " and "); dump_expr(b_expr);
+      fprintf(stderr, "\n");
+    }
+    return make_undefined_expr();
   }
   return make_int_expr(((IntExpr*) a_expr)->value - ((IntExpr*) b_expr)->value);
 }
 
-Expr *cmp_fn(Definitions *defs, ExprList *a, ExprList *b, int type) {
-  flatten_list(a, defs);
-  flatten_list(b, defs);
+Expr *cmp_fn(Environment *env, ExprList *a, ExprList *b, int type) {
+  flatten_list(a, env);
+  flatten_list(b, env);
   
   if (a->len == 0) fail();
   Expr *a_expr = a->ptr[a->len - 1]; // most resolved
@@ -1159,53 +1187,53 @@ Expr *cmp_fn(Definitions *defs, ExprList *a, ExprList *b, int type) {
   abort();
 }
 
-Expr *smaller_fn(Definitions *defs, ExprList *a, ExprList *b) {
-  return cmp_fn(defs, a, b, 0);
+Expr *smaller_fn(Environment *env, ExprList *a, ExprList *b) {
+  return cmp_fn(env, a, b, 0);
 }
 
-Expr *equal_fn(Definitions *defs, ExprList *a, ExprList *b) {
-  return cmp_fn(defs, a, b, 1);
+Expr *equal_fn(Environment *env, ExprList *a, ExprList *b) {
+  return cmp_fn(env, a, b, 1);
 }
 
-Expr *larger_fn(Definitions *defs, ExprList *a, ExprList *b) {
-  return cmp_fn(defs, a, b, 2);
+Expr *larger_fn(Environment *env, ExprList *a, ExprList *b) {
+  return cmp_fn(env, a, b, 2);
 }
 
-void setup_runtime(Definitions *defs) {
-  define(defs, "+", make_function_expr(make_identifier_expr("a"),
+void setup_runtime(Environment *env) {
+  define(env->defs, "+", make_function_expr(make_identifier_expr("a"),
     make_function_expr(make_identifier_expr("b"),
       make_native_function_expr("add_fn", add_fn)
     )
   ), true);
   
-  define(defs, "-", make_function_expr(make_identifier_expr("a"),
+  define(env->defs, "-", make_function_expr(make_identifier_expr("a"),
     make_function_expr(make_identifier_expr("b"),
       make_native_function_expr("sub_fn", sub_fn)
     )
   ), true);
   
-  define(defs, "<", make_function_expr(make_identifier_expr("a"),
+  define(env->defs, "<", make_function_expr(make_identifier_expr("a"),
     make_function_expr(make_identifier_expr("b"),
       make_native_function_expr("smaller_fn", smaller_fn)
     )
   ), true);
   
-  define(defs, "==", make_function_expr(make_identifier_expr("a"),
+  define(env->defs, "==", make_function_expr(make_identifier_expr("a"),
     make_function_expr(make_identifier_expr("b"),
       make_native_function_expr("equal_fn", equal_fn)
     )
   ), true);
   
-  define(defs, ">", make_function_expr(make_identifier_expr("a"),
+  define(env->defs, ">", make_function_expr(make_identifier_expr("a"),
     make_function_expr(make_identifier_expr("b"),
       make_native_function_expr("larger_fn", larger_fn)
     )
   ), true);
 }
 
-bool parse_tl(char **textp, Definitions *defs) {
-  if (parse_tl_define(textp, defs)) return true;
-  if (parse_tl_expr(textp, defs)) return true;
+bool parse_tl(char **textp, Environment *env) {
+  if (parse_tl_define(textp, env)) return true;
+  if (parse_tl_expr(textp, env)) return true;
   return false;
 }
 

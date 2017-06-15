@@ -59,9 +59,16 @@ Expr *flatten(Expr *expr, Environment *env);
 // this function transforms it into fn = x -> y -> 5
 Expr *transform_call_to_function_form(Expr *match_expr, Expr *value, const char **ident);
 
+typedef enum {
+  DUMP_ALL,
+  DUMP_FIRST,
+  DUMP_LAST
+} DumpMode;
+
 void dump_expr(Expr*);
 void dump_expr_first(Expr*);
-void dump_expr_internal(Expr*, bool first_only);
+void dump_expr_last(Expr*);
+void dump_expr_internal(Expr*, DumpMode mode);
 
 void define(Definitions *defs, const char *name, Expr *value, bool may_repeat);
 
@@ -104,13 +111,21 @@ Expr *get_single_expr(ExprList *list) {
   return list->ptr[0];
 }
 
-void dump_expr_list_internal(ExprList *list, bool first_only) {
-  if (first_only) {
+void dump_expr_list_internal(ExprList *list, DumpMode mode) {
+  if (mode == DUMP_FIRST) {
     if (list->len == 0) {
       fprintf(stderr, "[]");
       return;
     }
-    dump_expr_internal(list->ptr[0], true);
+    dump_expr_internal(list->ptr[0], mode);
+    return;
+  }
+  if (mode == DUMP_LAST) {
+    if (list->len == 0) {
+      fprintf(stderr, "[]");
+      return;
+    }
+    dump_expr_internal(list->ptr[list->len - 1], mode);
     return;
   }
   if (list->len != 1) {
@@ -118,7 +133,7 @@ void dump_expr_list_internal(ExprList *list, bool first_only) {
   }
   for (int i = 0; i < list->len; i++) {
     if (i > 0) fprintf(stderr, ", ");
-    dump_expr(list->ptr[i]);
+    dump_expr_internal(list->ptr[i], mode);
   }
   if (list->len != 1) {
     fprintf(stderr, "]");
@@ -1059,7 +1074,7 @@ bool match(Expr *value, Expr *target, Environment *env, Definitions *newdefs,
  * etc.
  */
 
-void dump_expr_internal(Expr *expr, bool first_only) {
+void dump_expr_internal(Expr *expr, DumpMode mode) {
   if (expr->type == EXPR_INT) {
     fprintf(stderr, "%i", ((IntExpr*)expr)->value);
   } else if (expr->type == EXPR_STRING) {
@@ -1068,23 +1083,23 @@ void dump_expr_internal(Expr *expr, bool first_only) {
     fprintf(stderr, "%s", ((IdentifierExpr*)expr)->name);
   } else if (expr->type == EXPR_CALL) {
     CallExpr *expr_call = (CallExpr*) expr;
-    dump_expr_list_internal(expr_call->fn, first_only);
+    dump_expr_list_internal(expr_call->fn, mode);
     fprintf(stderr, " (");
-    dump_expr_list_internal(expr_call->arg, first_only);
+    dump_expr_list_internal(expr_call->arg, mode);
     fprintf(stderr, ")");
   } else if (expr->type == EXPR_FUNCTION) {
     FunctionExpr *expr_fn = (FunctionExpr*) expr;
-    dump_expr_internal(expr_fn->match, first_only);
+    dump_expr_internal(expr_fn->match, mode);
     fprintf(stderr, " -> (");
-    dump_expr_list_internal(expr_fn->value, first_only);
+    dump_expr_list_internal(expr_fn->value, mode);
     fprintf(stderr, ")");
   } else if (expr->type == EXPR_NATIVE_FUNCTION) {
     NativeFunctionExpr *expr_native = (NativeFunctionExpr*) expr;
     if (expr_native->a && expr_native->b) {
       fprintf(stderr, "%s (", expr_native->name);
-      dump_expr_list_internal(expr_native->a, first_only);
+      dump_expr_list_internal(expr_native->a, mode);
       fprintf(stderr, ") (");
-      dump_expr_list_internal(expr_native->b, first_only);
+      dump_expr_list_internal(expr_native->b, mode);
       fprintf(stderr, ")");
     } else {
       fprintf(stderr, "<native %s>", expr_native->name);
@@ -1095,11 +1110,15 @@ void dump_expr_internal(Expr *expr, bool first_only) {
 }
 
 void dump_expr(Expr *expr) {
-  dump_expr_internal(expr, false);
+  dump_expr_internal(expr, DUMP_ALL);
 }
 
 void dump_expr_first(Expr *expr) {
-  dump_expr_internal(expr, true);
+  dump_expr_internal(expr, DUMP_FIRST);
+}
+
+void dump_expr_last(Expr *expr) {
+  dump_expr_internal(expr, DUMP_LAST);
 }
 
 bool eat_bilby_filler(char **textp) {

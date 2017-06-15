@@ -181,13 +181,21 @@ bool parse_expr_base2(char **textp, Expr **expr) {
   return false;
 }
 
-bool parse_expr_base(char **text, Expr **expr) {
-  if (!parse_expr_base2(text, expr)) return false;
+bool parse_expr_base(char **text, Expr **expr_p) {
+  if (!parse_expr_base2(text, expr_p)) return false;
+  if (eat_string(text, "->")) {
+    Expr *match = *expr_p;
+    Expr *value;
+    parse_must(*text, parse_expr_base(text, &value), "Function expression expected.");
+    value = transform_call_to_function_form(match, value, NULL);
+    *expr_p = value;
+    return true;
+  }
   while (true) {
     Expr *arg;
     if (eat_string(text, "\n")) break;
     if (!parse_expr_base2(text, &arg)) break;
-    *expr = make_call_expr(*expr, arg);
+    *expr_p = make_call_expr(*expr_p, arg);
   }
   return true;
 }
@@ -392,7 +400,7 @@ bool parse_tl_expr(char **textp, Environment *env) {
     Environment debug_env = *env;
     debug_env.verbose = true;
     flatten(value, &debug_env);
-    fprintf(stderr, "! No expression matched.\n");
+    fprintf(stderr, "! No expression found.\n");
     return true;
   }
   dump_expr(expr); fprintf(stderr, "\n");
@@ -466,6 +474,12 @@ Expr *make_native_function_expr(const char *name, Expr *(*fn)(Environment*,ExprL
   return (Expr*) res;
 }
 
+// if ident is not null:
+// a = b      ->      'a': b
+// a b = c    ->      'a': b -> c
+// if ident is null:
+// a = b      ->      a -> b
+// a b = c    ->      a -> b -> c
 Expr *transform_call_to_function_form(Expr *match_expr, Expr *value, const char **ident) {
   if (match_expr->type == EXPR_CALL) {
     CallExpr *match = (CallExpr*) match_expr;
@@ -473,6 +487,9 @@ Expr *transform_call_to_function_form(Expr *match_expr, Expr *value, const char 
     return transform_call_to_function_form(get_single_expr(match->fn), value, ident);
   }
   if (match_expr->type == EXPR_IDENTIFIER) {
+    if (!ident) {
+      return make_function_expr(match_expr, value);
+    }
     IdentifierExpr *match = (IdentifierExpr*) match_expr;
     *ident = match->name;
     return value;

@@ -70,7 +70,7 @@ void dump_expr_first(Expr*);
 void dump_expr_last(Expr*);
 void dump_expr_internal(Expr*, DumpMode mode);
 
-void define(Definitions *defs, const char *name, Expr *value, bool may_repeat);
+void define(Definitions *defs, const char *name, Expr *value, bool may_repeat, bool may_be_undefined);
 
 void fail() {
 #ifdef __AFL_COMPILER
@@ -81,12 +81,15 @@ void fail() {
 }
 
 ExprList *list_from_expr(Expr *expr) {
-  Expr **ptr = malloc(sizeof(Expr*) * 1);
-  ptr[0] = expr;
+  int len = 1;
+  if (expr->type == EXPR_UNDEFINED) len = 0;
+  Expr **ptr = malloc(sizeof(Expr*) * len);
+  if (expr->type != EXPR_UNDEFINED) ptr[0] = expr;
+  
   ExprList *list = malloc(sizeof(ExprList));
   *list = (ExprList) {
     .ptr = ptr,
-    .len = 1,
+    .len = len,
     .next_evaluate = 0
   };
   return list;
@@ -301,13 +304,15 @@ bool parse_tl_define(char **textp, Environment *env) {
   const char *ident;
   value = transform_call_to_function_form(match_value, value, &ident);
   
-  define(env->defs, ident, value, true);
+  define(env->defs, ident, value, true, true);
   
   *textp = text;
   return true;
 }
 
-void define(Definitions *defs, const char *name, Expr *value, bool may_repeat) {
+void define(Definitions *defs, const char *name, Expr *value, bool may_repeat, bool may_be_undefined) {
+  if (!may_be_undefined && value->type == EXPR_UNDEFINED) abort();
+  
   if (!may_repeat) {
     DefinitionList *cursor = defs->listp;
     while (cursor) {
@@ -472,6 +477,9 @@ Expr *make_function_expr(Expr *match, Expr *value) {
 }
 
 Expr *make_function_expr_from_list(Expr *match, ExprList *value) {
+  for (int i = 0; i < value->len; i++) {
+    if (value->ptr[i]->type == EXPR_UNDEFINED) abort();
+  }
   FunctionExpr *res = malloc(sizeof(FunctionExpr));
   res->base.type = EXPR_FUNCTION;
   res->match = match;
@@ -528,7 +536,7 @@ Definitions fork_definitions(Definitions *defs, Definitions *fallback) {
 void merge_definitions(Definitions *target, Definitions *src) {
   DefinitionList *listp = src->listp;
   while (listp) {
-    define(target, listp->def.name, listp->def.value, false);
+    define(target, listp->def.name, listp->def.value, false, false);
     listp = listp->prev;
   }
 }
@@ -551,7 +559,7 @@ Expr *flatten(Expr *expr, Environment *env) {
       return make_undefined_expr();
     }
     if (exprs2_len != 1) {
-      fprintf(stderr, "Internal error.\n");
+      fprintf(stderr, "Internal error: expression is ambiguous.\n");
       fail();
     }
     if (expr2 == expr) break;
@@ -693,12 +701,23 @@ void flatten_list(ExprList *list, Environment *env) {
   Expr **new_exprs_ptr = new_exprs_scrap; int new_exprs_len = 1;
   int capacity = 1;
   expr_array_init_capacity(&capacity, &new_exprs_len);
+  
+  if (env->verbose) {
+    for (int i = 0; i < list->len; i++) {
+      Expr *expr = list->ptr[i];
+      expr_array_reset(&new_exprs_ptr, &new_exprs_len, &capacity,
+                      new_exprs_scrap, new_exprs_len);
+      evaluate(expr, env, &new_exprs_ptr, &new_exprs_len);
+    }
+  }
+  
   while (list->next_evaluate != list->len) {
     Expr *expr = list->ptr[list->next_evaluate++];
     
     expr_array_reset(&new_exprs_ptr, &new_exprs_len, &capacity,
                      new_exprs_scrap, new_exprs_len);
     evaluate(expr, env, &new_exprs_ptr, &new_exprs_len);
+    
     for (int i = 0; i < new_exprs_len; i++) {
       bool dupe = false;
       for (int k = 0; k < list->len; k++) {
@@ -711,6 +730,7 @@ void flatten_list(ExprList *list, Environment *env) {
       expr_list_push(list, new_exprs_ptr[i]);
     }
   }
+  if (new_exprs_ptr != new_exprs_scrap) free(new_exprs_ptr);
 }
 
 void step_expr_list(ExprList *list, Environment *env) {
@@ -741,6 +761,9 @@ void evaluate(Expr *expr, Environment *env, Expr ***exprs_ptr_p, int *exprs_len_
   if (verbose) {
     fprintf(stderr, "%*seval : ", indent_depth, ""); dump_expr(expr); fprintf(stderr, "\n");
   }
+  /*if (env->verbose) {
+    fprintf(stderr, "eval: "); dump_expr_first(expr); fprintf(stderr, "\n");
+  }*/
   if (expr->type == EXPR_IDENTIFIER) {
     IdentifierExpr *ident_expr = (IdentifierExpr*) expr;
     
@@ -781,6 +804,21 @@ void evaluate(Expr *expr, Environment *env, Expr ***exprs_ptr_p, int *exprs_len_
     }
     
     ExprList *arg_list = call_expr->arg;
+    
+    if (env->verbose) {
+      Expr *arg_exprs_scrap[1];
+      Expr **arg_exprs_ptr = arg_exprs_scrap; int arg_exprs_len = 1;
+      int capacity = 1;
+      expr_array_init_capacity(&capacity, &arg_exprs_len);
+      
+      for (int i = 0; i < arg_list->len; i++) {
+        Expr *expr = arg_list->ptr[i];
+        expr_array_reset(&arg_exprs_ptr, &arg_exprs_len, &capacity,
+                        arg_exprs_scrap, arg_exprs_len);
+        evaluate(expr, env, &arg_exprs_ptr, &arg_exprs_len);
+      }
+      if (arg_exprs_ptr != arg_exprs_scrap) free(arg_exprs_ptr);
+    }
     
     for (int s = highest_specificity; s >= 0; s--) {
       int num_matched = 0;
@@ -957,7 +995,7 @@ bool _match(Expr *value, Expr *target, Environment *env, Definitions *newdefs,
   
   if (!lexical && target->type == EXPR_IDENTIFIER) {
     IdentifierExpr *target_ident = (IdentifierExpr*) target;
-    define(newdefs, target_ident->name, value, false);
+    define(newdefs, target_ident->name, value, false, false);
     return true;
   }
   
@@ -1209,10 +1247,12 @@ Expr *cmp_fn(Environment *env, ExprList *a, ExprList *b, int type) {
   if (b_expr->type == EXPR_UNDEFINED) return b_expr;
   
   if (a_expr->type != EXPR_INT || b_expr->type != EXPR_INT) {
-    fprintf(stderr, "internal error: invalid merge for native function '<>'\n");
-    fprintf(stderr, "a: "); dump_expr(a_expr); fprintf(stderr, "\n");
-    fprintf(stderr, "b: "); dump_expr(b_expr); fprintf(stderr, "\n");
-    fail();
+    if (env->verbose) {
+      fprintf(stderr, "Invalid operands for native function '<>' %i\n", type);
+      fprintf(stderr, "a: "); dump_expr(a_expr); fprintf(stderr, "\n");
+      fprintf(stderr, "b: "); dump_expr(b_expr); fprintf(stderr, "\n");
+    }
+    return make_undefined_expr();
   }
   
   int av = ((IntExpr*) a_expr)->value;

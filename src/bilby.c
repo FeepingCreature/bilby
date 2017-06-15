@@ -487,7 +487,7 @@ Expr *make_function_expr_from_list(Expr *match, ExprList *value) {
   return (Expr*) res;
 }
 
-Expr *make_native_function_expr(const char *name, Expr *(*fn)(Environment*,ExprList*,ExprList*)) {
+Expr *make_native_function_expr(const char *name, ResolveFn fn) {
   NativeFunctionExpr *res = malloc(sizeof(NativeFunctionExpr));
   res->base.type = EXPR_NATIVE_FUNCTION;
   res->name = name;
@@ -1209,7 +1209,7 @@ Expr *add_fn(Environment *env, ExprList *a, ExprList *b) {
   return make_int_expr(((IntExpr*) a_expr)->value + ((IntExpr*) b_expr)->value);
 }
 
-Expr *sub_fn(Environment *env, ExprList *a, ExprList *b) {
+Expr *int_math_fn(Environment *env, ExprList *a, ExprList *b, int mode) {
   flatten_list(a, env);
   flatten_list(b, env);
   
@@ -1230,7 +1230,23 @@ Expr *sub_fn(Environment *env, ExprList *a, ExprList *b) {
     }
     return make_undefined_expr();
   }
-  return make_int_expr(((IntExpr*) a_expr)->value - ((IntExpr*) b_expr)->value);
+  int ia = ((IntExpr*) a_expr)->value, ib = ((IntExpr*) b_expr)->value;
+  if (mode == 0) { return make_int_expr(ia - ib); }
+  if (mode == 1) { return make_int_expr(ia * ib); }
+  if (mode == 2) { return make_int_expr(ia / ib); }
+  abort();
+}
+
+Expr *int_sub_fn(Environment *env, ExprList *a, ExprList *b) {
+  return int_math_fn(env, a, b, 0);
+}
+
+Expr *int_mul_fn(Environment *env, ExprList *a, ExprList *b) {
+  return int_math_fn(env, a, b, 1);
+}
+
+Expr *int_div_fn(Environment *env, ExprList *a, ExprList *b) {
+  return int_math_fn(env, a, b, 2);
 }
 
 Expr *cmp_fn(Environment *env, ExprList *a, ExprList *b, int type) {
@@ -1275,36 +1291,22 @@ Expr *larger_fn(Environment *env, ExprList *a, ExprList *b) {
   return cmp_fn(env, a, b, 2);
 }
 
+void define_dyadic_native_fn(Environment *env, const char *identifier, const char *name, ResolveFn fn) {
+  define(env->defs, identifier, make_function_expr(make_identifier_expr("a"),
+    make_function_expr(make_identifier_expr("b"),
+      make_native_function_expr(name, fn)
+    )
+  ), true, false);
+}
+
 void setup_runtime(Environment *env) {
-  define(env->defs, "+", make_function_expr(make_identifier_expr("a"),
-    make_function_expr(make_identifier_expr("b"),
-      make_native_function_expr("add_fn", add_fn)
-    )
-  ), true);
-  
-  define(env->defs, "-", make_function_expr(make_identifier_expr("a"),
-    make_function_expr(make_identifier_expr("b"),
-      make_native_function_expr("sub_fn", sub_fn)
-    )
-  ), true);
-  
-  define(env->defs, "<", make_function_expr(make_identifier_expr("a"),
-    make_function_expr(make_identifier_expr("b"),
-      make_native_function_expr("smaller_fn", smaller_fn)
-    )
-  ), true);
-  
-  define(env->defs, "==", make_function_expr(make_identifier_expr("a"),
-    make_function_expr(make_identifier_expr("b"),
-      make_native_function_expr("equal_fn", equal_fn)
-    )
-  ), true);
-  
-  define(env->defs, ">", make_function_expr(make_identifier_expr("a"),
-    make_function_expr(make_identifier_expr("b"),
-      make_native_function_expr("larger_fn", larger_fn)
-    )
-  ), true);
+  define_dyadic_native_fn(env, "+", "add_fn", add_fn);
+  define_dyadic_native_fn(env, "-", "int_sub_fn", int_sub_fn);
+  define_dyadic_native_fn(env, "*", "int_mul_fn", int_mul_fn);
+  define_dyadic_native_fn(env, "/", "int_div_fn", int_div_fn);
+  define_dyadic_native_fn(env, "<", "smaller_fn", smaller_fn);
+  define_dyadic_native_fn(env, "==", "equal_fn", equal_fn);
+  define_dyadic_native_fn(env, ">", "larger_fn", larger_fn);
 }
 
 bool parse_tl(char **textp, Environment *env) {

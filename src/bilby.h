@@ -75,11 +75,13 @@ typedef struct {
   ExprList *value;
 } FunctionExpr;
 
+typedef Expr* (*ResolveFn)(Environment*, ExprList *a, ExprList *b);
+
 typedef struct {
   Expr base;
   const char *name;
   // TODO arity other than 2
-  Expr* (*resolve_fn)(Environment*, ExprList *a, ExprList *b);
+  ResolveFn resolve_fn;
   ExprList *a, *b; // arguments
 } NativeFunctionExpr;
 
